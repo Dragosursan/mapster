@@ -1,6 +1,7 @@
 ﻿using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System;
 
 namespace Mapster.Common.MemoryMappedTypes;
 
@@ -25,6 +26,17 @@ public readonly ref struct MapFeatureData
     public ReadOnlySpan<char> Label { get; init; }
     public ReadOnlySpan<Coordinate> Coordinates { get; init; }
     public Dictionary<string, string> Properties { get; init; }
+    static public Dictionary<Props, string> RenderableProperties { get; set; } = new();
+    public enum Props{
+        Waterway =    0,
+        Highway =     1,
+        Railway =     2,
+        Residential = 3,
+        Natural =     4,
+        Plain =       5,
+        Water =       6,
+        Forest =      7
+    };
 }
 
 /// <summary>
@@ -139,7 +151,68 @@ public unsafe class DataFile : IDisposable
         }
 
         GetString(stringsOffset, charsOffset, i, out key);
+
         GetString(stringsOffset, charsOffset, i + 1, out value);
+        if (key == "highway")
+        {
+            foreach (var v in MapFeature.HighwayTypes)
+            {
+                if (v.StartsWith(value.ToString()))
+                {
+                    MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Highway, value.ToString());
+                    break;
+                }
+            }
+        }
+        else if (key.ToString().StartsWith("water"))
+        {
+            MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Waterway, value.ToString());
+        }
+        else if (key.StartsWith("railway"))
+        {
+            MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Railway, value.ToString());
+        }
+        else if (key.StartsWith("natural"))
+        {
+            MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Natural, value.ToString());
+        }
+        else if (value.StartsWith("forest"))
+        {
+            if (key.StartsWith("landuse") || key.StartsWith("boundary"))
+            {
+                MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Forest, value.ToString());
+            }
+        }
+        else if (value.StartsWith("orchard"))
+        {
+            if (key.StartsWith("landuse"))
+            {
+                MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Forest, value.ToString());
+            }
+        }
+        else if (key.ToString().StartsWith("landuse"))
+        {
+            if (value.StartsWith("residential") || 
+                value.StartsWith("cemetery") || 
+                value.StartsWith("industrial") || 
+                value.StartsWith("commercial") ||
+                value.StartsWith("square") || 
+                value.StartsWith("construction") || 
+                value.StartsWith("military") || 
+                value.StartsWith("quarry") || 
+                value.StartsWith("brownfield"))
+            {
+                MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Residential,value.ToString());
+            }
+            else if(value.StartsWith("reservoir") || value.StartsWith("basin"))
+            {
+                MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Water, value.ToString());
+            }
+        }
+        else if (key.ToString().StartsWith("building") || key.ToString().StartsWith("leisure") || key.ToString().StartsWith("amenity"))
+        {
+            MapFeatureData.RenderableProperties.TryAdd(MapFeatureData.Props.Residential, value.ToString());
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
@@ -161,7 +234,10 @@ public unsafe class DataFile : IDisposable
             for (var j = 0; j < header.Tile.Value.FeaturesCount; ++j)
             {
                 var feature = GetFeature(j, header.TileOffset);
-                var coordinates = GetCoordinates(header.Tile.Value.CoordinatesOffsetInBytes, feature->CoordinateOffset, feature->CoordinateCount);
+                var coordinates = GetCoordinates(
+                    header.Tile.Value.CoordinatesOffsetInBytes, 
+                    feature->CoordinateOffset, 
+                    feature->CoordinateCount);
                 var isFeatureInBBox = false;
 
                 for (var k = 0; k < coordinates.Length; ++k)
@@ -176,7 +252,10 @@ public unsafe class DataFile : IDisposable
                 var label = ReadOnlySpan<char>.Empty;
                 if (feature->LabelOffset >= 0)
                 {
-                    GetString(header.Tile.Value.StringsOffsetInBytes, header.Tile.Value.CharactersOffsetInBytes, feature->LabelOffset, out label);
+                    GetString(
+                        header.Tile.Value.StringsOffsetInBytes, 
+                        header.Tile.Value.CharactersOffsetInBytes, 
+                        feature->LabelOffset, out label);
                 }
 
                 if (isFeatureInBBox)
@@ -184,7 +263,11 @@ public unsafe class DataFile : IDisposable
                     var properties = new Dictionary<string, string>(feature->PropertyCount);
                     for (var p = 0; p < feature->PropertyCount; ++p)
                     {
-                        GetProperty(header.Tile.Value.StringsOffsetInBytes, header.Tile.Value.CharactersOffsetInBytes, p * 2 + feature->PropertiesOffset, out var key, out var value);
+                        GetProperty(
+                            header.Tile.Value.StringsOffsetInBytes, 
+                            header.Tile.Value.CharactersOffsetInBytes, 
+                            p * 2 + feature->PropertiesOffset, 
+                            out var key, out var value);
                         properties.Add(key.ToString(), value.ToString());
                     }
 
